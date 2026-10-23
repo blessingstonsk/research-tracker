@@ -1,0 +1,96 @@
+/* ===== Research Plan + Literature ===== */
+function viewPlan() {
+  const s = Store.state(); const today = C.todayISO(); const P = U.plan;
+  const objs = C.live(s.objectives).sort((a, b) => (a.code || '').localeCompare(b.code || ''));
+  const objCards = objs.map(o => {
+    const p = C.objectiveProgress(s, o.id); const ms = C.live(s.milestones).filter(m => m.objectiveId === o.id);
+    const tasks = C.live(s.tasks).filter(t => t.objectiveId === o.id); const open = tasks.filter(t => !C.isDone(t.status)).length;
+    const eff = C.summarizeLogs(s, C.filterLogs(s, { objectiveId: o.id }));
+    const exps = C.live(s.experiments).filter(e => e.objectiveId === o.id).length; const papers = C.live(s.papers).filter(pp => pp.objective && (pp.objective === o.code || pp.objective === o.focus)).length;
+    return '<section class="card" data-tilt><header><div><span class="obj"><span class="code">' + esc(o.code) + '</span></span><h3 style="margin-top:2px">' + esc(o.title) + '</h3></div><button class="btn sm" data-act="edit" data-col="objectives" data-id="' + o.id + '">Edit</button></header>' +
+      (p.pct == null ? '<div class="note">Progress unavailable: no confirmed milestones for ' + esc(o.code) + ' yet.</div>' : '<div class="row between small"><span>' + p.done + ' of ' + p.total + ' milestones complete</span><b class="num">' + p.pct + '%</b></div><div class="bar" style="margin:6px 0 4px"><i style="width:' + p.pct + '%"></i></div>') +
+      '<dl class="det" style="margin-top:10px;background:none;padding:0">' +
+      ['Description', 'description', 'Expected contribution', 'contribution', 'Success criteria', 'successCriteria', 'Evidence', 'evidence'].reduce((a, x, i, arr) => i % 2 ? a : a + '<div><dt>' + x + '</dt><dd>' + (esc(o[arr[i + 1]]) || '<span class="muted">Not written yet</span>') + '</dd></div>', '') + '</dl>' +
+      '<div class="m small muted" style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap"><span>Effort: <b class="num">' + fmtH(eff.totalHours) + ' h</b> over ' + eff.days + ' day(s)</span><span>' + open + ' open / ' + tasks.length + ' task(s)</span><span>' + exps + ' experiment(s)</span><span>' + papers + ' paper(s)</span><span>' + p.deliverables + ' deliverable(s)</span></div>' +
+      (ms.length ? '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">' + ms.map(m => '<a href="#" class="chip" data-act="edit" data-col="milestones" data-id="' + m.id + '">' + (C.isDone(m.status) ? '✓ ' : '') + esc(trunc(m.title, 40)) + (m.template ? ' · suggested' : '') + '</a>').join('') + '</div>' : '') + '</section>';
+  }).join('');
+  const msRows = C.live(s.milestones).sort((a, b) => (a.targetDate || '9999').localeCompare(b.targetDate || '9999'));
+  const milestones = '<section class="card"><header><h2>Milestones</h2><div class="row"><span class="small muted">' + (C.programmeProgress(s).pct == null ? 'No confirmed milestones' : C.programmeProgress(s).done + ' of ' + C.programmeProgress(s).total + ' confirmed milestones complete') + '</span><button class="btn sm primary" data-act="new" data-col="milestones">' + ICON.plus + ' Milestone</button></div></header>' +
+    (msRows.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Milestone</th><th>Type</th><th>Objective</th><th>Target</th><th>Status</th><th>Completed</th></tr></thead><tbody>' + msRows.map(m => { const o = m.objectiveId && Store.get('objectives', m.objectiveId);
+      return '<tr class="click" data-act="edit" data-col="milestones" data-id="' + m.id + '"><td class="wrap">' + esc(m.title) + (m.template ? ' <span class="pill warn nodot">Suggested</span>' : '') + '</td><td>' + esc(m.kind || '') + '</td><td>' + (o ? esc(o.code) : '<span class="muted">Programme</span>') + '</td><td class="mono">' + (m.targetDate ? C.fmtDate(m.targetDate) + (m.targetDate < today && !C.isDone(m.status) ? ' <span class="pill bad nodot">late</span>' : '') : '<span class="muted">Not set</span>') + '</td><td>' + statusPill(m.status) + '</td><td class="mono">' + (m.completedDate ? C.fmtDate(m.completedDate) : '') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">No milestones yet.</div>') +
+    '<p class="small muted">Suggested milestones (comprehensive viva, literature review, baseline, experiments, submission, progress review, thesis chapter) start uncounted. Open one, set its date and save to confirm it.</p></section>';
+
+  let tasks = C.live(s.tasks).filter(t => (!P.obj || t.objectiveId === P.obj) && (!P.status || t.status === P.status) && (!P.q || [t.title, t.nextAction, t.blocker, t.notes].some(v => v && v.toLowerCase().includes(P.q.toLowerCase()))));
+  const pr = { High: 0, Medium: 1, Low: 2 };
+  tasks.sort((a, b) => (C.isDone(a.status) - C.isDone(b.status)) || ((pr[a.priority] ?? 1) - (pr[b.priority] ?? 1)) || (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
+  const ctrl = '<div class="filters"><div class="seg" role="group" aria-label="Task view">' + ['list', 'kanban', 'calendar'].map(m => '<button data-act="plan-mode" data-mode="' + m + '" aria-pressed="' + (P.mode === m) + '">' + m[0].toUpperCase() + m.slice(1) + '</button>').join('') + '</div>' +
+    '<input type="search" id="p-q" placeholder="Search tasks" value="' + esc(P.q) + '" data-input="plan:q">' + selectHTML('p-obj', opt.objectives(s), P.obj, 'All objectives', 'plan:obj') + (P.mode !== 'kanban' ? selectHTML('p-status', s.settings.statuses, P.status, 'All statuses', 'plan:status') : '') +
+    '<button class="btn primary" data-act="new" data-col="tasks">' + ICON.plus + ' Task</button></div>';
+  let tv = '';
+  if (P.mode === 'kanban') tv = '<div class="kanban">' + s.settings.statuses.map(st => { const ts = tasks.filter(t => (t.status || 'Planned') === st);
+    return '<div class="col" data-drop="' + esc(st) + '"><header>' + statusPill(st) + '<span class="num muted">' + ts.length + '</span></header>' + ts.map(t => taskCard(s, t, today)).join('') + (ts.length ? '' : '<div class="small muted">Drop tasks here</div>') + '</div>'; }).join('') + '</div><p class="small muted">Drag cards between columns, or change status from each card.</p>';
+  else if (P.mode === 'calendar') tv = calendarHTML(s, tasks, today);
+  else tv = tasks.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Task</th><th>Objective / focus</th><th>Priority</th><th>Due</th><th class="n">Est. h</th><th class="n">Actual h</th><th>Status</th><th>Depends on</th><th>Next action / blocker</th></tr></thead><tbody>' + tasks.map(t => { const a = C.taskActualHours(s, t.id); const o = t.objectiveId && Store.get('objectives', t.objectiveId);
+      const deps = (t.dependsOn || []).map(id => Store.get('tasks', id)).filter(Boolean); const waiting = !C.depsDone(s, t);
+      return '<tr class="click" data-act="edit" data-col="tasks" data-id="' + t.id + '"><td class="wrap"><b>' + esc(t.title) + '</b>' + (t.owner ? '<div class="small muted">Owner: ' + esc(t.owner) + '</div>' : '') + '</td><td>' + (o ? '<span class="chip">' + esc(o.code) + '</span> ' : '') + (t.focus ? kindChip(s.settings, t.focus) : '') + '</td><td>' + esc(t.priority || '') + '</td><td class="mono">' + (t.dueDate ? C.fmtDate(t.dueDate) + (t.dueDate < today && !C.isDone(t.status) ? ' <span class="pill bad nodot">overdue</span>' : '') : '<span class="muted">—</span>') + '</td><td class="n">' + (C.isNum(t.estHours) ? fmtH(t.estHours) : '—') + '</td><td class="n">' + (a.sessions ? fmtH(a.hours) : '—') + '</td><td>' + statusPill(t.status) + (waiting ? ' <span class="pill warn nodot">waiting</span>' : '') + '</td><td class="small">' + deps.map(d => esc(trunc(d.title, 30)) + (C.isDone(d.status) ? ' ✓' : '')).join('<br>') + '</td><td class="small wrap">' + esc(t.nextAction || '') + (t.blocker ? '<div style="color:var(--bad)">Blocker: ' + esc(t.blocker) + '</div>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>'
+    : '<div class="empty"><b>No tasks' + (P.obj || P.status || P.q ? ' match these filters' : ' yet') + '</b>Create one here, from a log entry’s Next Step, or from a meeting action.</div>';
+  return '<div class="page-head"><div><h1>Research plan</h1><p>Objectives, milestones and tasks. Progress comes from completed milestones; hours shown are effort only.</p></div><button class="btn" data-act="new" data-col="objectives">' + ICON.plus + ' Objective</button></div>' +
+    '<div class="grid g3">' + objCards + '</div>' + milestones + '<section class="grid" style="gap:10px"><h2>Tasks</h2>' + ctrl + tv + '</section>';
+}
+function taskCard(s, t, today) {
+  const o = t.objectiveId && Store.get('objectives', t.objectiveId);
+  return '<div class="kcard" draggable="true" data-drag="' + t.id + '"><a href="#" class="t" data-act="edit" data-col="tasks" data-id="' + t.id + '">' + esc(t.title) + '</a><div class="row small muted">' + (o ? '<span class="chip">' + esc(o.code) + '</span>' : '') + '<span>' + esc(t.priority || 'Medium') + '</span>' + (t.dueDate ? '<span class="mono" style="' + (t.dueDate < today && !C.isDone(t.status) ? 'color:var(--bad)' : '') + '">' + C.fmtShort(t.dueDate) + '</span>' : '') + '</div>' +
+    (t.blocker && t.status === 'Blocked' ? '<div class="small" style="color:var(--bad)">' + esc(trunc(t.blocker, 80)) + '</div>' : '') +
+    '<select aria-label="Status" data-change="task-status:' + t.id + '" class="small" style="padding:3px 6px">' + s.settings.statuses.map(st => '<option' + (st === t.status ? ' selected' : '') + '>' + esc(st) + '</option>').join('') + '</select></div>';
+}
+function calendarHTML(s, tasks, today) {
+  const month = U.plan.month || today.slice(0, 7); const first = month + '-01'; const gridStart = C.weekStart(first); const last = C.monthEnd(first);
+  const evs = {}; tasks.forEach(t => { if (t.dueDate) (evs[t.dueDate] = evs[t.dueDate] || []).push({ k: 'task', r: t }); });
+  C.live(s.milestones).forEach(m => { if (m.targetDate && (!U.plan.obj || m.objectiveId === U.plan.obj)) (evs[m.targetDate] = evs[m.targetDate] || []).push({ k: 'ms', r: m }); });
+  C.live(s.manuscripts).forEach(m => { if (m.deadline) (evs[m.deadline] = evs[m.deadline] || []).push({ k: 'ms', r: m, col: 'manuscripts', label: 'Deadline: ' + m.title }); });
+  let cells = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => '<div class="dh">' + d + '</div>').join('');
+  for (let d = gridStart; d <= last || C.diffDays(gridStart, d) % 7 !== 0; d = C.addDays(d, 1)) {
+    const e = evs[d] || [];
+    cells += '<div class="dc' + (d.slice(0, 7) !== month ? ' out' : '') + (d === today ? ' today' : '') + '"><span class="dn">' + Number(d.slice(8)) + '</span>' + e.map(x => { const col = x.col || (x.k === 'task' ? 'tasks' : 'milestones'); const done = C.isDone(x.r.status);
+      return '<button class="ev ' + (x.k === 'ms' ? 'ms' : '') + (done ? ' done' : '') + (!done && x.k === 'task' && d < today ? ' od' : '') + '" data-act="edit" data-col="' + col + '" data-id="' + x.r.id + '" title="' + esc(x.label || x.r.title) + '">' + (x.k === 'ms' ? '◆ ' : '') + esc(x.label || x.r.title) + '</button>'; }).join('') + '</div>';
+    if (C.diffDays(gridStart, d) > 45) break;
+  }
+  const undated = tasks.filter(t => !t.dueDate && !C.isDone(t.status));
+  return '<div class="row between"><div class="row"><button class="btn sm icon" data-act="cal-prev" aria-label="Previous month">' + ICON.left + '</button><b style="min-width:120px;text-align:center">' + C.monthLabel(first) + '</b><button class="btn sm icon" data-act="cal-next" aria-label="Next month">' + ICON.right + '</button><button class="btn sm ghost" data-act="cal-today">Today</button></div><span class="legend"><span><i style="background:var(--accent-soft)"></i>Task due</span><span><i style="background:var(--warn-bg)"></i>Milestone / deadline</span></span></div>' +
+    '<div style="overflow-x:auto"><div class="cal" style="min-width:560px">' + cells + '</div></div>' + (undated.length ? '<p class="small muted">' + undated.length + ' open task(s) have no due date and are not shown on the calendar.</p>' : '');
+}
+
+/* ---------- Literature ---------- */
+function viewLiterature() {
+  const s = Store.state(); const Lt = U.lit;
+  const all = C.live(s.papers);
+  const tags = Array.from(new Set(all.flatMap(p => p.keywords || []))).sort();
+  let papers = all.filter(p => (!Lt.obj || p.objective === Lt.obj) && (!Lt.status || (Lt.status === '__none' ? !p.readingStatus : p.readingStatus === Lt.status)) && (!Lt.tag || (p.keywords || []).includes(Lt.tag)));
+  if (Lt.q) { const t = Lt.q.toLowerCase(); papers = papers.filter(p => [p.title, p.authors, p.venueYear, p.keyIdea, p.methodDataset, p.limitation, p.findings, p.notes, (p.keywords || []).join(' ')].some(v => v && String(v).toLowerCase().includes(t))); }
+  papers.sort((a, b) => (b.dateRead || '').localeCompare(a.dateRead || '') || (a.title || '').localeCompare(b.title || ''));
+  const counts = {}; s.settings.readingStatuses.forEach(x => counts[x] = 0); let unset = 0; all.forEach(p => p.readingStatus ? counts[p.readingStatus] = (counts[p.readingStatus] || 0) + 1 : unset++);
+  const logSum = C.summarizeLogs(s, C.live(s.logs));
+  const objOpts = opt.objFocus(s).filter(x => x[0]);
+  const filt = '<div class="filters"><input type="search" id="lt-q" placeholder="Search title, authors, ideas, methods, notes…" value="' + esc(Lt.q) + '" data-input="lit:q">' + selectHTML('lt-obj', objOpts, Lt.obj, 'All objectives', 'lit:obj') +
+    selectHTML('lt-st', s.settings.readingStatuses.concat([['__none', 'Status not set']]), Lt.status, 'All reading statuses', 'lit:status') + (tags.length ? selectHTML('lt-tag', tags, Lt.tag, 'All tags', 'lit:tag') : '') +
+    '<button class="btn" data-act="cite-export" data-fmt="bibtex">BibTeX</button><button class="btn" data-act="cite-export" data-fmt="ris">RIS</button><button class="btn primary" data-act="new" data-col="papers">' + ICON.plus + ' Paper</button></div>';
+  const tabs = '<div class="tabs" role="tablist">' + [['library', 'Library'], ['compare', 'Comparison table'], ['gaps', 'Research-gap register']].map(([k, l]) => '<button role="tab" aria-selected="' + (Lt.tab === k) + '" data-act="lit-tab" data-tab="' + k + '">' + l + '</button>').join('') + '</div>';
+  let body = '';
+  if (Lt.tab === 'library') body = papers.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Title</th><th>Authors</th><th>Venue / Year</th><th>Objective</th><th>Status</th><th>Date read</th><th>Cite?</th></tr></thead><tbody>' + papers.map(p =>
+      '<tr class="click" data-act="edit" data-col="papers" data-id="' + p.id + '"><td class="wrap"><b>' + esc(p.title) + '</b>' + ((p.keywords || []).length ? '<div class="row" style="gap:4px;margin-top:3px">' + p.keywords.map(k => '<span class="chip">' + esc(k) + '</span>').join('') + '</div>' : '') + '</td><td class="small wrap">' + (esc(p.authors) || '<span class="muted">—</span>') + '</td><td class="small">' + (esc(p.venueYear) || '<span class="muted">—</span>') + '</td><td class="small">' + esc(p.objective || '') + '</td><td>' + (p.readingStatus ? statusPill(p.readingStatus) : '<span class="muted small">Not set</span>') + '</td><td class="mono small">' + (p.dateRead ? C.fmtDate(p.dateRead) : '') + '</td><td>' + esc(p.cite || '') + '</td></tr>').join('') + '</tbody></table></div>'
+    : '<div class="empty"><b>' + (all.length ? 'No papers match these filters' : 'Your literature library is empty') + '</b>' + (all.length ? '' : 'The workbook’s Reading Log had no paper rows. Add papers here; nothing is filled in automatically.') + '</div>';
+  else if (Lt.tab === 'compare') body = papers.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Paper</th><th>Method / Dataset</th><th>Main findings</th><th>Limitation / Gap</th><th>Relevance to my objectives</th></tr></thead><tbody>' + papers.map(p => {
+      const cell = v => v ? esc(v) : '<span class="muted">Not recorded</span>';
+      return '<tr class="click" data-act="edit" data-col="papers" data-id="' + p.id + '"><td class="wrap"><b>' + esc(p.title) + '</b><div class="small muted">' + esc([p.authors, p.venueYear].filter(Boolean).join(' · ')) + '</div></td><td class="small wrap">' + cell(p.methodDataset) + '</td><td class="small wrap">' + cell(p.findings || p.keyIdea) + '</td><td class="small wrap">' + cell(p.limitation) + '</td><td class="small wrap">' + (p.objective ? '<span class="chip">' + esc(p.objective) + '</span> ' : '') + cell(p.useInWork) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">Add papers to compare methods, datasets, findings and limitations side by side.</div>';
+  else {
+    const gaps = C.live(s.gaps);
+    body = '<div class="row between"><p class="small muted" style="margin:0">Link each proposed gap to the papers that support it and to an experiment that could test it.</p><button class="btn primary" data-act="new" data-col="gaps">' + ICON.plus + ' Gap</button></div>' + (gaps.length ? '<div class="grid g2">' + gaps.map(g => {
+      const ps = (g.paperIds || []).map(id => Store.get('papers', id)).filter(p => p && !p.deleted); const e = g.experimentId && Store.get('experiments', g.experimentId); const o = g.objectiveId && Store.get('objectives', g.objectiveId);
+      return '<section class="card" data-tilt><header><a href="#" data-act="edit" data-col="gaps" data-id="' + g.id + '"><h3>' + esc(g.title) + '</h3></a>' + statusPill(g.status) + '</header>' + (g.description ? '<p class="small" style="margin:0 0 8px">' + esc(g.description) + '</p>' : '') +
+        '<div class="small"><span class="eyebrow">Supporting papers</span><div class="row" style="gap:4px;margin:4px 0 8px">' + (ps.length ? ps.map(p => '<a href="#" class="chip" data-act="edit" data-col="papers" data-id="' + p.id + '">' + esc(trunc(p.title, 46)) + '</a>').join('') : '<span class="muted">None linked — a gap needs evidence</span>') + '</div>' +
+        '<span class="eyebrow">Possible experiment</span><div style="margin-top:4px">' + (e ? '<a href="#" class="chip" data-act="edit" data-col="experiments" data-id="' + e.id + '">' + esc((e.expId ? e.expId + ' · ' : '') + (e.title || '')) + '</a>' : (g.experimentIdea ? esc(g.experimentIdea) + ' ' : '<span class="muted">Not defined</span> ') + '<button class="btn sm" data-act="gap-exp" data-id="' + g.id + '">Create experiment</button>') + '</div>' + (o ? '<div class="muted" style="margin-top:8px">Objective ' + esc(o.code) + '</div>' : '') + '</div></section>'; }).join('') + '</div>' : '<div class="empty">No gaps recorded yet.</div>');
+  }
+  return '<div class="page-head"><div><h1>Literature</h1><p>Only papers marked <b>Read</b> count as fully read. The daily log’s “Papers Read” field is kept as a separate legacy count.</p></div></div>' +
+    '<section class="kpis">' + s.settings.readingStatuses.map(k => '<div class="kpi"><div class="l">' + esc(k) + '</div><div class="v">' + (counts[k] || 0) + '</div></div>').join('') + '<div class="kpi"><div class="l">Status not set</div><div class="v">' + unset + '</div></div><div class="kpi"><div class="l">Log “Papers Read” field</div><div class="v">' + (logSum.papersReadN ? logSum.papersReadSum : '—') + '</div><div class="s">' + (logSum.papersReadN ? 'from ' + logSum.papersReadN + ' session(s); may overlap the library' : 'Not recorded in any session') + '</div></div></section>' +
+    tabs + filt + body;
+}
